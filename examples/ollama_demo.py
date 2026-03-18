@@ -70,20 +70,15 @@ def _run_tool_loop(
 
         # Execute every tool call the model requested
         print(f"\n  [round {round_num + 1}] model called {len(msg.tool_calls)} tool(s):")
-        tool_results = handler.handle_batch(
-            [
-                {"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments}
-                for tc in msg.tool_calls
-            ]
-        )
+        tool_results = handler.handle_batch(list(msg.tool_calls))
 
         for tc, result in zip(msg.tool_calls, tool_results):
             print(f"    • {tc.function.name}({tc.function.arguments[:60]}…)")
-            print(f"      → {json.dumps(result)[:80]}")
+            print(f"      → {result[:80]}")
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": json.dumps(result),
+                "content": result,
             })
 
     return "(max rounds reached)"

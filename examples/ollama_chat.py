@@ -25,7 +25,6 @@ Run:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import readline  # noqa: F401 — enables arrow-key history in input()
 import sys
@@ -78,17 +77,12 @@ def _run_tool_loop(
 
         print(GREY(f"  [tool calls: {', '.join(tc.function.name for tc in msg.tool_calls)}]"))
 
-        tool_results = handler.handle_batch(
-            [
-                {"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments}
-                for tc in msg.tool_calls
-            ]
-        )
+        tool_results = handler.handle_batch(list(msg.tool_calls))
         for tc, result in zip(msg.tool_calls, tool_results):
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": json.dumps(result),
+                "content": result,
             })
 
     return "(max rounds reached)"
