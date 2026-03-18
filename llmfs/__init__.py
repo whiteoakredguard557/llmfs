@@ -1,0 +1,38 @@
+"""
+LLMFS — filesystem-metaphor memory layer for LLMs and AI agents.
+
+Public API::
+
+    from llmfs import MemoryFS
+
+    mem = MemoryFS()
+    mem.write("/projects/auth", content="JWT bug at line 45")
+    results = mem.search("authentication")
+    obj = mem.read("/projects/auth")
+"""
+from llmfs.core.filesystem import MemoryFS
+from llmfs.core.memory_object import MemoryObject, SearchResult
+from llmfs.core.memory_layers import MemoryLayer
+from llmfs.core.exceptions import (
+    LLMFSError,
+    MemoryNotFoundError,
+    MemoryWriteError,
+    MemoryDeleteError,
+    EmbedderError,
+    StorageError,
+)
+
+__all__ = [
+    "MemoryFS",
+    "MemoryObject",
+    "SearchResult",
+    "MemoryLayer",
+    "LLMFSError",
+    "MemoryNotFoundError",
+    "MemoryWriteError",
+    "MemoryDeleteError",
+    "EmbedderError",
+    "StorageError",
+]
+
+__version__ = "0.1.0"

@@ -1,0 +1,101 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmfs"
+version = "0.1.0"
+description = "A filesystem-metaphor memory layer for LLMs and AI agents"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+keywords = ["llm", "memory", "ai", "agent", "vector-database", "rag", "mcp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "scikit-learn>=1.3.0",
+    "numpy>=1.24.0",
+    "mcp>=0.1.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0.0"]
+langchain = ["langchain>=0.1.0", "langchain-core>=0.1.0"]
+fuse = ["fusepy>=3.0.1"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-asyncio>=0.21",
+]
+all = [
+    "openai>=1.0.0",
+    "langchain>=0.1.0",
+    "langchain-core>=0.1.0",
+    "fusepy>=3.0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/llmfs"
+Documentation = "https://github.com/yourusername/llmfs#readme"
+Repository = "https://github.com/yourusername/llmfs"
+"Bug Tracker" = "https://github.com/yourusername/llmfs/issues"
+
+[project.scripts]
+llmfs = "llmfs.cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llmfs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "strict"
+markers = [
+    "integration: end-to-end tests that use real storage and embedder",
+    "performance: latency assertion tests",
+    "slow: tests that take > 10s",
+]
+
+[tool.coverage.run]
+source = ["llmfs"]
+omit = ["tests/*", "examples/*"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]
+show_missing = true
+skip_empty = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "B008", "UP007"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true

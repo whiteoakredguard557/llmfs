@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "llmfs": {
+      "command": "llmfs",
+      "args": ["serve", "--stdio"],
+      "env": {},
+      "description": "LLMFS — AI memory filesystem. Persistent, searchable, graph-linked memory for Claude, Cursor, and any MCP-compatible client."
+    }
+  }
+}
