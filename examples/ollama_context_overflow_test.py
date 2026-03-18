@@ -52,18 +52,21 @@ def _chat(client, model, messages, tools=None):
 
 
 def _tool_round(client, model, handler, messages, max_rounds=6):
+    """Run tool loop. Returns (reply_text, tools_called list)."""
+    tools_called = []
     for _ in range(max_rounds):
         msg = _chat(client, model, messages, tools=LLMFS_TOOLS)
         messages.append(msg.model_dump(exclude_none=True))
         if not msg.tool_calls:
-            return msg.content or ""
+            return msg.content or "", tools_called
         names = [tc.function.name for tc in msg.tool_calls]
+        tools_called.extend(names)
         print(f"    [tool calls: {', '.join(names)}]")
         for tc in msg.tool_calls:
             result = handler.handle(tc)
             print(f"      {tc.function.name} → {result[:100]}")
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-    return "(max rounds)"
+    return "(max rounds)", tools_called
 
 
 FILLER_EXCHANGES = [
@@ -212,24 +215,19 @@ def main():
     print(f"User: {recall_prompt}\n")
     messages.append({"role": "user", "content": recall_prompt})
 
-    # Snapshot accessed_at before so we can detect if LLMFS was queried
-    snap = mem.read(SECRET_PATH)
-    reply = _tool_round(client, args.model, handler, messages)
+    reply, tools_called = _tool_round(client, args.model, handler, messages)
     print(f"\nAssistant: {reply}")
 
     # ── Phase 4: Verdict ──────────────────────────────────────────────────────
     _divider("Phase 4 — Verdict")
 
-    after = mem.read(SECRET_PATH)
-    llmfs_queried = (
-        after is not None
-        and snap is not None
-        and after.metadata.accessed_at != snap.metadata.accessed_at
-    )
+    memory_tools = {"memory_search", "memory_read"}
+    llmfs_queried = bool(set(tools_called) & memory_tools)
     correct = SECRET_VALUE in (reply or "")
 
     print(f"\n  Secret value   : {SECRET_VALUE}")
-    print(f"  LLMFS queried  : {'✓ YES — model called memory_search/read' if llmfs_queried else '✗ NO  — model did not query LLMFS'}")
+    print(f"  Tools called   : {tools_called if tools_called else '(none)'}")
+    print(f"  LLMFS queried  : {'✓ YES' if llmfs_queried else '✗ NO  — model answered without searching'}")
     print(f"  Correct answer : {'✓ YES' if correct else '✗ NO'}")
 
     if correct and llmfs_queried:
@@ -237,14 +235,18 @@ def main():
         print("           Model retrieved the secret from persistent storage,")
         print("           not from conversation history.")
     elif correct and not llmfs_queried:
-        print("\n  ~ PARTIAL — Correct answer, but from context window (not LLMFS).")
+        print("\n  ~ PARTIAL — Correct answer, but model used context window, not LLMFS.")
         if args.flood_tokens > 0:
             print(f"              Try --flood-tokens {args.flood_tokens * 2} to push harder.")
         else:
             print(f"              Try --flood-tokens 30000 to overflow the context fast.")
+    elif not correct and llmfs_queried:
+        print("\n  ~ SEARCHED but wrong — model queried LLMFS but gave a bad answer.")
+        print("           Check the tool result printed above.")
     else:
-        print("\n  ✗ FAIL — Model could not recall the secret.")
-        print(f"    Debug: the secret is at {SECRET_PATH} in store {store}")
+        print("\n  ✗ FAIL — Model did not search LLMFS and could not recall the secret.")
+        print(f"    The secret is confirmed at: {SECRET_PATH}")
+        print(f"    Store: {store}")
 
     print(f"\n  Store: {store}")
     print('─' * 60)
