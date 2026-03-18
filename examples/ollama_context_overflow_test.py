@@ -142,19 +142,20 @@ def main():
 
     SYSTEM = (
         "You are a helpful assistant with persistent memory via LLMFS tools. "
-        "Use memory_write to store important facts. "
-        "When asked to recall something, ALWAYS use memory_search or memory_read "
-        "to retrieve it from memory — never rely solely on conversation history."
+        "Whenever the user shares important facts, codes, or information worth "
+        "keeping, proactively store them using memory_write without being asked. "
+        "When answering questions, use memory_search to check your stored memories "
+        "for relevant context before responding."
     )
 
     # Shared message list — this is what will overflow
     messages = [{"role": "system", "content": SYSTEM}]
 
-    # ── Phase 1: Store the secret ─────────────────────────────────────────────
-    _divider("Phase 1 — Store a secret fact in LLMFS")
+    # ── Phase 1: Store the secret naturally ──────────────────────────────────
+    _divider("Phase 1 — Share a secret fact (model should store it proactively)")
     store_prompt = (
-        f"Please store the following secret code in your memory at path {SECRET_PATH}: "
-        f'"{SECRET_VALUE}". Use memory_write. Confirm when done.'
+        f'Hey, just so you know, our deployment secret code is "{SECRET_VALUE}". '
+        f"Keep that safe, we'll need it later."
     )
     print(f"User: {store_prompt}")
     messages.append({"role": "user", "content": store_prompt})
@@ -163,11 +164,20 @@ def main():
 
     # Verify it was actually written
     stored = mem.read(SECRET_PATH)
+    if not stored:
+        # Model may have chosen a different path — search for it
+        results = mem.search(SECRET_VALUE)
+        if results:
+            stored = mem.read(results[0].path)
+            SECRET_PATH = results[0].path
+
     if stored and SECRET_VALUE in stored.content:
-        print(f"\n  ✓ Confirmed in LLMFS: {SECRET_PATH} = '{stored.content}'")
+        print(f"\n  ✓ Confirmed in LLMFS: {stored.path} = '{stored.content}'")
+        SECRET_PATH = stored.path
     else:
-        print(f"\n  ✗ FAILED: Secret was not stored in LLMFS!")
-        sys.exit(1)
+        print(f"\n  ✗ Model did not store the secret in LLMFS.")
+        print(f"    All memories: {[o.path for o in mem.list('/')]}")
+        print(f"    Continuing anyway to test recall behaviour...")
 
     context_size_after_store = len(messages)
 
@@ -192,46 +202,47 @@ def main():
     print(f"  Secret stored at message index: ~{context_size_after_store - 2} of {total_messages}")
 
     # ── Phase 3: Ask model to recall without hints ────────────────────────────
-    _divider("Phase 3 — Ask model to recall the secret (must use LLMFS)")
-    recall_prompt = (
-        "What was the secret code I asked you to remember earlier? "
-        "Search your memory to find it."
-    )
+    _divider("Phase 3 — Ask naturally, no memory hint")
+    recall_prompt = "Hey what was that deployment secret code again?"
     print(f"User: {recall_prompt}\n")
     messages.append({"role": "user", "content": recall_prompt})
+
+    # Track accessed_at before recall so we can detect if LLMFS was queried
+    before_recall = mem.read(SECRET_PATH)
     reply = _tool_round(client, args.model, handler, messages)
     print(f"\nAssistant: {reply}")
 
     # ── Phase 4: Verdict ──────────────────────────────────────────────────────
     _divider("Phase 4 — Verdict")
     recalled = SECRET_VALUE in (reply or "")
-    used_memory = mem.search("secret code") or mem.search(SECRET_VALUE[:8])
 
-    print(f"\n  Secret value    : {SECRET_VALUE}")
-    print(f"  In LLM reply    : {'✓ YES' if recalled else '✗ NO'}")
-    print(f"  LLMFS read count: {stored.metadata.accessed_at or 'n/a'}")
-
-    # Check if memory_read or memory_search was called in this phase
-    # (by checking if accessed_at changed — a proxy for "was read")
     refreshed = mem.read(SECRET_PATH)
     was_accessed = (
-        refreshed and refreshed.metadata.accessed_at != stored.metadata.accessed_at
+        refreshed
+        and before_recall
+        and refreshed.metadata.accessed_at != before_recall.metadata.accessed_at
     )
-    print(f"  Memory accessed : {'✓ YES' if was_accessed else '? (check tool call log above)'}")
 
-    if recalled:
-        print("\n  ✓ PASS — LLMFS successfully bridged the context window gap!")
-        print("           The model retrieved the fact from persistent storage,")
+    stored_in_llmfs = bool(before_recall and SECRET_VALUE in before_recall.content)
+
+    print(f"\n  Secret value      : {SECRET_VALUE}")
+    print(f"  Stored in LLMFS   : {'✓ YES' if stored_in_llmfs else '✗ NO  ← model never stored it'}")
+    print(f"  LLMFS queried     : {'✓ YES' if was_accessed else '✗ NO  ← model recalled from context (not a real test)'}")
+    print(f"  Correct answer    : {'✓ YES' if recalled else '✗ NO'}")
+
+    if not stored_in_llmfs:
+        print("\n  ✗ INCONCLUSIVE — model never stored the secret proactively.")
+        print("    Try a larger model or explicitly ask it to store facts first.")
+    elif recalled and was_accessed:
+        print("\n  ✓ PASS — Model retrieved the secret from LLMFS autonomously,")
         print("           not from conversation history.")
+    elif recalled and not was_accessed:
+        print("\n  ~ PARTIAL — Model answered correctly but recalled from context,")
+        print("              not from LLMFS. Try --filler-turns with a higher value")
+        print("              or a larger model to truly overflow the context window.")
     else:
         print("\n  ✗ FAIL — Model could not recall the secret.")
-        print("           Either the model ignored memory tools, or the search")
-        print("           didn't return the right result.")
-        print(f"\n  Debug: run  python -c \"")
-        print(f"    from llmfs import MemoryFS")
-        print(f"    m = MemoryFS('{store}')")
-        print(f"    print(m.read('{SECRET_PATH}').content)")
-        print(f"  \"")
+        print("           Check the tool call log above.")
 
     print(f"\n  Store kept at: {store}")
     print('─' * 60)
