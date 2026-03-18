@@ -1,0 +1,5 @@
+# Core LLMFS package — installs MemoryFS and all dependencies
+llmfs @ git+https://github.com/viditraj/llmfs.git
+
+# Ollama / OpenAI-compatible client
+openai>=1.0.0
