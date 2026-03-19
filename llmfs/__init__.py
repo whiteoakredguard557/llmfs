@@ -10,6 +10,7 @@ Public API::
     results = mem.search("authentication")
     obj = mem.read("/projects/auth")
 """
+from llmfs.core.async_fs import AsyncMemoryFS
 from llmfs.core.exceptions import (
     EmbedderError,
     LLMFSError,
@@ -24,6 +25,7 @@ from llmfs.core.memory_object import MemoryObject, SearchResult
 
 __all__ = [
     "MemoryFS",
+    "AsyncMemoryFS",
     "MemoryObject",
     "SearchResult",
     "MemoryLayer",

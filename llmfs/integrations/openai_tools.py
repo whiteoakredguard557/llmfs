@@ -250,6 +250,35 @@ LLMFS_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "memory_list",
+            "description": (
+                "List memories under a path prefix, like 'ls'. "
+                "Returns paths, layers, tags, and timestamps. "
+                "Use this to browse what is stored before reading or searching."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path_prefix": {
+                        "type": "string",
+                        "description": "Only list memories whose path starts here. Defaults to /.",
+                    },
+                    "layer": {
+                        "type": "string",
+                        "enum": ["short_term", "session", "knowledge", "events"],
+                        "description": "Restrict listing to a specific layer.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of entries to return (default 50).",
+                    },
+                },
+            },
+        },
+    },
 ]
 
 

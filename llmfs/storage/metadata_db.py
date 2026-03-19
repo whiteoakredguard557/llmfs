@@ -81,12 +81,48 @@ CREATE TABLE IF NOT EXISTS search_cache (
     expires_at    TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_files_layer ON files(layer);
-CREATE INDEX IF NOT EXISTS idx_files_path  ON files(path);
-CREATE INDEX IF NOT EXISTS idx_files_ttl   ON files(ttl_expires);
-CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file_id);
-CREATE INDEX IF NOT EXISTS idx_rel_source  ON relationships(source_id);
-CREATE INDEX IF NOT EXISTS idx_rel_target  ON relationships(target_id);
+CREATE INDEX IF NOT EXISTS idx_files_layer      ON files(layer);
+CREATE INDEX IF NOT EXISTS idx_files_path       ON files(path);
+CREATE INDEX IF NOT EXISTS idx_files_ttl        ON files(ttl_expires);
+CREATE INDEX IF NOT EXISTS idx_files_layer_mod  ON files(layer, modified_at);
+CREATE INDEX IF NOT EXISTS idx_files_hash       ON files(content_hash);
+CREATE INDEX IF NOT EXISTS idx_chunks_file      ON chunks(file_id);
+CREATE INDEX IF NOT EXISTS idx_rel_source       ON relationships(source_id);
+CREATE INDEX IF NOT EXISTS idx_rel_target       ON relationships(target_id);
+
+-- FTS5 full-text search index over chunk text (BM25 keyword search)
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    text,
+    content='chunks',
+    content_rowid='rowid',
+    tokenize='porter unicode61'
+);
+
+-- Persistent embedding cache: avoids re-embedding identical strings across sessions
+CREATE TABLE IF NOT EXISTS embedding_cache (
+    text_hash   TEXT NOT NULL,      -- SHA-256 of the input text
+    embedding   TEXT NOT NULL,      -- JSON-encoded float list
+    model_name  TEXT NOT NULL,      -- embedder model that produced this vector
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (text_hash, model_name)
+);
+CREATE INDEX IF NOT EXISTS idx_emb_cache_model ON embedding_cache(model_name);
+"""
+
+# Triggers to keep FTS5 in sync with the chunks table.
+# Executed separately because CREATE TRIGGER is not allowed inside executescript
+# alongside virtual table creation on some SQLite builds.
+_FTS_TRIGGER_SQL = """
+CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
 """
 
 
@@ -124,6 +160,7 @@ class MetadataDB:
     def _initialize(self) -> None:
         with self._lock:
             self._conn.executescript(_SCHEMA_SQL)
+            self._conn.executescript(_FTS_TRIGGER_SQL)
             self._conn.commit()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -554,6 +591,171 @@ class MetadataDB:
                 "DELETE FROM search_cache WHERE results_json LIKE ?",
                 (f"%{path}%",),
             )
+
+    # ── BM25 full-text search ─────────────────────────────────────────────────
+
+    def fts_search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        layer: str | None = None,
+        path_prefix: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """BM25 keyword search over chunk text via FTS5.
+
+        Args:
+            query: Raw keyword query string.
+            limit: Maximum results to return.
+            layer: Optional layer filter.
+            path_prefix: Optional path prefix filter.
+
+        Returns:
+            List of dicts with ``file_id``, ``path``, ``chunk_index``,
+            ``text``, ``bm25_score`` keys, ordered by relevance (most
+            relevant first).  ``bm25_score`` is negated so higher = better.
+        """
+        if not query.strip():
+            return []
+        # FTS5 match query — escape double-quotes in user input
+        safe_q = query.replace('"', '""')
+        sql = """
+            SELECT c.file_id, c.chunk_index, c.text, c.embedding_id,
+                   f.path, f.layer,
+                   rank AS bm25_score
+            FROM chunks_fts fts
+            JOIN chunks c ON c.rowid = fts.rowid
+            JOIN files f ON f.id = c.file_id
+            WHERE chunks_fts MATCH ?
+        """
+        params: list[Any] = [safe_q]
+        if layer:
+            sql += " AND f.layer = ?"
+            params.append(layer)
+        if path_prefix:
+            sql += " AND f.path LIKE ?"
+            params.append(path_prefix.rstrip("/") + "%")
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(limit)
+        try:
+            rows = self._query(sql, tuple(params))
+        except StorageError:
+            # FTS match can fail on malformed queries — fall back to empty
+            return []
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            # rank from FTS5 is negative (lower = better); negate for score
+            d["bm25_score"] = -float(d.get("bm25_score", 0))
+            results.append(d)
+        return results
+
+    # ── Embedding cache ────────────────────────────────────────────────────────
+
+    def get_cached_embedding(
+        self,
+        text_hash: str,
+        model_name: str,
+    ) -> list[float] | None:
+        """Return a cached embedding vector, or ``None`` on miss.
+
+        Args:
+            text_hash: SHA-256 hex digest of the input text.
+            model_name: Model that should have produced the vector.
+
+        Returns:
+            Float list, or ``None``.
+        """
+        rows = self._query(
+            "SELECT embedding FROM embedding_cache WHERE text_hash = ? AND model_name = ?",
+            (text_hash, model_name),
+        )
+        if not rows:
+            return None
+        try:
+            return json.loads(rows[0]["embedding"])
+        except (json.JSONDecodeError, KeyError):
+            return None
+
+    def put_cached_embedding(
+        self,
+        text_hash: str,
+        embedding: list[float],
+        model_name: str,
+    ) -> None:
+        """Store an embedding vector in the persistent cache.
+
+        Args:
+            text_hash: SHA-256 hex digest of the input text.
+            embedding: Float vector to cache.
+            model_name: Model that produced this vector.
+        """
+        self._exec(
+            """
+            INSERT OR REPLACE INTO embedding_cache
+              (text_hash, embedding, model_name, created_at)
+            VALUES (?,?,?,?)
+            """,
+            (text_hash, json.dumps(embedding), model_name, self._utcnow()),
+        )
+
+    def get_cached_embeddings_batch(
+        self,
+        text_hashes: list[str],
+        model_name: str,
+    ) -> dict[str, list[float]]:
+        """Batch lookup of cached embeddings.
+
+        Args:
+            text_hashes: List of SHA-256 hex digests.
+            model_name: Expected model name.
+
+        Returns:
+            Dict mapping text_hash → float list for hits only.
+        """
+        if not text_hashes:
+            return {}
+        placeholders = ",".join("?" for _ in text_hashes)
+        rows = self._query(
+            f"SELECT text_hash, embedding FROM embedding_cache "
+            f"WHERE text_hash IN ({placeholders}) AND model_name = ?",
+            tuple(text_hashes) + (model_name,),
+        )
+        result: dict[str, list[float]] = {}
+        for row in rows:
+            try:
+                result[row["text_hash"]] = json.loads(row["embedding"])
+            except (json.JSONDecodeError, KeyError):
+                continue
+        return result
+
+    def put_cached_embeddings_batch(
+        self,
+        items: list[tuple[str, list[float]]],
+        model_name: str,
+    ) -> None:
+        """Batch store embedding vectors.
+
+        Args:
+            items: List of ``(text_hash, embedding)`` tuples.
+            model_name: Model that produced these vectors.
+        """
+        if not items:
+            return
+        now = self._utcnow()
+        with self._lock:
+            try:
+                self._conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO embedding_cache
+                      (text_hash, embedding, model_name, created_at)
+                    VALUES (?,?,?,?)
+                    """,
+                    [(h, json.dumps(e), model_name, now) for h, e in items],
+                )
+                self._conn.commit()
+            except sqlite3.Error as exc:
+                raise StorageError(str(exc)) from exc
 
     # ── Close ─────────────────────────────────────────────────────────────────
 

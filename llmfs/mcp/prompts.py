@@ -74,6 +74,11 @@ Use meaningful, hierarchical paths:
 - Remove outdated or incorrect information
 - Clear session layer at end of conversation
 
+**memory_list** — Browse stored memories:
+- List what is stored under a path prefix (like 'ls')
+- Discover available memories before reading or searching
+- Check what paths exist in a namespace
+
 **memory_relate** — Link memories:
 - Two memories are causally or topically related
 - An error trace relates to a code file

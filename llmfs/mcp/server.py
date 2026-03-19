@@ -124,7 +124,7 @@ class LLMFSMCPServer:
         return mcp
 
     def _register_tools(self, mcp: Any) -> None:
-        """Register all six LLMFS tools on *mcp*."""
+        """Register all seven LLMFS tools on *mcp*."""
         mem = self._mem
 
         @mcp.tool(
@@ -287,6 +287,32 @@ class LLMFSMCPServer:
                 "memory_relate",
                 {"source": source, "target": target,
                  "relationship": relationship, "strength": strength},
+                mem,
+            )
+
+        @mcp.tool(
+            name="memory_list",
+            description=(
+                "List memories under a path prefix, like 'ls'. "
+                "Returns paths, layers, tags, and timestamps. "
+                "Use this to browse what is stored before reading or searching."
+            ),
+        )
+        def memory_list(
+            path_prefix: str = "/",
+            layer: str | None = None,
+            limit: int = 50,
+        ) -> dict[str, Any]:
+            """List memories under *path_prefix*.
+
+            Args:
+                path_prefix: Only list memories whose path starts here. Defaults to /.
+                layer: Restrict listing to a specific layer.
+                limit: Maximum number of entries to return.
+            """
+            return handle_tool_call(
+                "memory_list",
+                {"path_prefix": path_prefix, "layer": layer, "limit": limit},
                 mem,
             )
 

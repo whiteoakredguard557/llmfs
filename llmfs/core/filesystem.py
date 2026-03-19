@@ -58,6 +58,13 @@ class MemoryFS:
             exist.  Defaults to ``~/.llmfs``.
         embedder: Embedder instance to use.  If ``None``, a
             :class:`~llmfs.embeddings.local.LocalEmbedder` is created lazily.
+        auto_link: If ``True`` (the default), automatically create
+            ``related_to`` graph edges to semantically similar memories on
+            each :meth:`write` call.
+        auto_link_threshold: Minimum cosine similarity to auto-create an
+            edge.  Defaults to ``0.75``.
+        auto_link_k: Maximum number of auto-link edges per write.
+            Defaults to ``3``.
 
     Example::
 
@@ -72,6 +79,10 @@ class MemoryFS:
         self,
         path: str | Path | None = None,
         embedder: EmbedderBase | None = None,
+        *,
+        auto_link: bool = True,
+        auto_link_threshold: float = 0.75,
+        auto_link_k: int = 3,
     ) -> None:
         self._base = Path(path) if path else _DEFAULT_BASE
         self._base.mkdir(parents=True, exist_ok=True)
@@ -82,6 +93,10 @@ class MemoryFS:
         self._summarizer = ExtractiveSummarizer()
         self._embedder: EmbedderBase | None = embedder  # lazy if None
 
+        self._auto_link = auto_link
+        self._auto_link_threshold = auto_link_threshold
+        self._auto_link_k = auto_link_k
+
         self._last_gc: float = 0.0
         self._gc_if_due()
         logger.info("MemoryFS ready at %s", self._base)
@@ -91,7 +106,7 @@ class MemoryFS:
     def _get_embedder(self) -> EmbedderBase:
         if self._embedder is None:
             from llmfs.embeddings.local import LocalEmbedder
-            self._embedder = LocalEmbedder()
+            self._embedder = LocalEmbedder(cache_db=self._db)
         return self._embedder
 
     # ── GC ────────────────────────────────────────────────────────────────────
@@ -264,6 +279,11 @@ class MemoryFS:
             ),
         )
         logger.debug("write: path=%s chunks=%d summary_len=%d", path, len(chunk_objs), len(doc_summary))
+
+        # Auto-link: create edges to semantically similar memories
+        if self._auto_link and embeddings:
+            self._auto_link_memory(mem_id, path, embeddings[0])
+
         return mem_obj
 
     # ── Read ──────────────────────────────────────────────────────────────────
@@ -311,7 +331,11 @@ class MemoryFS:
         time_range: str | None = None,
         k: int = 5,
     ) -> list[SearchResult]:
-        """Semantic search across stored memories.
+        """Hybrid semantic + BM25 search across stored memories.
+
+        Combines dense vector similarity from ChromaDB with BM25 keyword
+        scoring from SQLite FTS5, fused via Reciprocal Rank Fusion for the
+        best of both worlds.
 
         Args:
             query: Natural-language search query.
@@ -339,55 +363,28 @@ class MemoryFS:
             logger.debug("search cache hit: %s", cache_key[:8])
             return [SearchResult(**r) for r in cached]
 
-        q_emb = self._get_embedder().embed(query)
-
-        # Build ChromaDB where filter
-        where = self._build_where(layer=layer, path_prefix=path_prefix)
-
-        raw = self._vs.query(q_emb, k=k * 3, where=where or None)
-
-        # Resolve file-level metadata from SQLite and apply tag / time filters
-        seen: dict[str, SearchResult] = {}
         created_after = _parse_time_range(time_range) if time_range else None
 
-        for item in raw:
-            item_path: str = item["metadata"].get("path", "")
-            if not item_path:
-                continue
-            if item_path in seen and item["score"] <= seen[item_path].score:
-                continue
+        # ── Dense (semantic) retrieval ────────────────────────────────────
+        q_emb = self._get_embedder().embed(query)
+        where = self._build_where(layer=layer, path_prefix=path_prefix)
+        raw_dense = self._vs.query(q_emb, k=k * 3, where=where or None)
 
-            file_row = self._db.get_file(item_path)
-            if not file_row:
-                continue
+        dense_results = self._raw_hits_to_results(
+            raw_dense, tags=tags, created_after=created_after,
+        )
 
-            # Tag filter
-            if tags:
-                file_tags = set(file_row.get("tags", []))
-                if not all(t in file_tags for t in tags):
-                    continue
+        # ── BM25 (keyword) retrieval ──────────────────────────────────────
+        bm25_results = self._bm25_search(
+            query, layer=layer, path_prefix=path_prefix,
+            tags=tags, created_after=created_after, limit=k * 3,
+        )
 
-            # Time filter
-            if created_after:
-                created = file_row.get("created_at", "")
-                if created and created < created_after:
-                    continue
+        # ── Fuse via Reciprocal Rank Fusion ───────────────────────────────
+        from llmfs.retrieval.ranker import Ranker
+        ranker = Ranker()
+        results = ranker.fuse(dense_results, bm25_results, top_k=k)
 
-            seen[item_path] = SearchResult(
-                path=item_path,
-                content=item["text"],
-                score=item["score"],
-                metadata={
-                    "layer": file_row.get("layer", ""),
-                    "created_at": file_row.get("created_at", ""),
-                    "modified_at": file_row.get("modified_at", ""),
-                    "source": file_row.get("source", ""),
-                },
-                tags=file_row.get("tags", []),
-                chunk_text=item["text"],
-            )
-
-        results = sorted(seen.values(), key=lambda r: r.score, reverse=True)[:k]
         self._db.cache_set(cache_key, [r.to_dict() for r in results])
         return results
 
@@ -647,6 +644,166 @@ class MemoryFS:
         return {"deleted": deleted, "status": "ok"}
 
     # ── Internals ─────────────────────────────────────────────────────────────
+
+    def _raw_hits_to_results(
+        self,
+        raw_hits: list[dict],
+        *,
+        tags: list[str] | None = None,
+        created_after: str | None = None,
+    ) -> list[SearchResult]:
+        """Convert ChromaDB raw hits to SearchResult, applying post-filters."""
+        seen: dict[str, SearchResult] = {}
+        for item in raw_hits:
+            item_path: str = item["metadata"].get("path", "")
+            if not item_path:
+                continue
+            if item_path in seen and item["score"] <= seen[item_path].score:
+                continue
+
+            file_row = self._db.get_file(item_path)
+            if not file_row:
+                continue
+
+            if tags:
+                file_tags = set(file_row.get("tags", []))
+                if not all(t in file_tags for t in tags):
+                    continue
+
+            if created_after:
+                created = file_row.get("created_at", "")
+                if created and created < created_after:
+                    continue
+
+            seen[item_path] = SearchResult(
+                path=item_path,
+                content=item["text"],
+                score=item["score"],
+                metadata={
+                    "layer": file_row.get("layer", ""),
+                    "created_at": file_row.get("created_at", ""),
+                    "modified_at": file_row.get("modified_at", ""),
+                    "source": file_row.get("source", ""),
+                },
+                tags=file_row.get("tags", []),
+                chunk_text=item["text"],
+            )
+        return sorted(seen.values(), key=lambda r: r.score, reverse=True)
+
+    def _bm25_search(
+        self,
+        query: str,
+        *,
+        layer: str | None = None,
+        path_prefix: str | None = None,
+        tags: list[str] | None = None,
+        created_after: str | None = None,
+        limit: int = 20,
+    ) -> list[SearchResult]:
+        """BM25 keyword search via SQLite FTS5, returning SearchResults."""
+        fts_hits = self._db.fts_search(
+            query, limit=limit, layer=layer, path_prefix=path_prefix,
+        )
+        if not fts_hits:
+            return []
+
+        # Normalize BM25 scores to [0, 1]
+        max_score = max(h["bm25_score"] for h in fts_hits) if fts_hits else 1.0
+        max_score = max(max_score, 0.001)  # avoid division by zero
+
+        seen: dict[str, SearchResult] = {}
+        for hit in fts_hits:
+            path = hit.get("path", "")
+            if not path:
+                continue
+            norm_score = hit["bm25_score"] / max_score
+
+            if path in seen and norm_score <= seen[path].score:
+                continue
+
+            file_row = self._db.get_file(path)
+            if not file_row:
+                continue
+
+            if tags:
+                file_tags = set(file_row.get("tags", []))
+                if not all(t in file_tags for t in tags):
+                    continue
+
+            if created_after:
+                created = file_row.get("created_at", "")
+                if created and created < created_after:
+                    continue
+
+            seen[path] = SearchResult(
+                path=path,
+                content=hit.get("text", ""),
+                score=norm_score,
+                metadata={
+                    "layer": file_row.get("layer", ""),
+                    "created_at": file_row.get("created_at", ""),
+                    "modified_at": file_row.get("modified_at", ""),
+                    "source": file_row.get("source", ""),
+                },
+                tags=file_row.get("tags", []),
+                chunk_text=hit.get("text", ""),
+            )
+        return sorted(seen.values(), key=lambda r: r.score, reverse=True)
+
+    def _auto_link_memory(
+        self,
+        mem_id: str,
+        path: str,
+        embedding: list[float],
+    ) -> None:
+        """Create ``related_to`` edges to semantically similar memories.
+
+        Uses the first chunk embedding to find neighbours via ChromaDB,
+        then creates graph edges for any that exceed the similarity threshold.
+        Runs silently — never raises.
+        """
+        try:
+            # Query for neighbours (oversample to filter self)
+            hits = self._vs.query(
+                embedding,
+                k=self._auto_link_k + 5,
+            )
+            src_row = self._db.get_file(path)
+            if not src_row:
+                return
+
+            linked = 0
+            for hit in hits:
+                hit_path = hit["metadata"].get("path", "")
+                if not hit_path or hit_path == path:
+                    continue
+                if hit["score"] < self._auto_link_threshold:
+                    continue
+                tgt_row = self._db.get_file(hit_path)
+                if not tgt_row:
+                    continue
+                # Check if relationship already exists
+                existing_rels = self._db.get_relationships(src_row["id"])
+                already_linked = any(
+                    r["target_id"] == tgt_row["id"] for r in existing_rels
+                )
+                if already_linked:
+                    continue
+                rel_id = str(uuid.uuid4())
+                self._db.insert_relationship(
+                    id=rel_id,
+                    source_id=src_row["id"],
+                    target_id=tgt_row["id"],
+                    rel_type="related_to",
+                    strength=round(hit["score"], 3),
+                )
+                linked += 1
+                if linked >= self._auto_link_k:
+                    break
+            if linked:
+                logger.debug("auto_link: %s linked to %d neighbours", path, linked)
+        except Exception as exc:
+            logger.debug("auto_link failed (non-fatal): %s", exc)
 
     def _load_object(self, row: dict[str, Any]) -> MemoryObject:
         """Reconstruct a MemoryObject from a SQLite file row."""

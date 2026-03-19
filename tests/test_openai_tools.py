@@ -35,6 +35,7 @@ EXPECTED_TOOL_NAMES = [
     "memory_update",
     "memory_forget",
     "memory_relate",
+    "memory_list",
 ]
 
 
@@ -85,7 +86,7 @@ class TestLLMFSToolDefinitions:
         assert isinstance(LLMFS_TOOLS, list)
 
     def test_has_exactly_six_tools(self):
-        assert len(LLMFS_TOOLS) == 6
+        assert len(LLMFS_TOOLS) == 7
 
     def test_all_expected_names_present(self):
         names = [t["function"]["name"] for t in LLMFS_TOOLS]

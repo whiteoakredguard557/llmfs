@@ -227,6 +227,34 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["source", "target", "relationship"],
         },
     },
+    {
+        "name": "memory_list",
+        "description": (
+            "List memories under a path prefix, like 'ls'. "
+            "Returns paths, layers, tags, and timestamps. "
+            "Use this to browse what is stored before reading or searching."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path_prefix": {
+                    "type": "string",
+                    "default": "/",
+                    "description": "Only list memories whose path starts here. Defaults to /.",
+                },
+                "layer": {
+                    "type": "string",
+                    "enum": ["short_term", "session", "knowledge", "events"],
+                    "description": "Restrict listing to a specific layer.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Maximum number of entries to return.",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -256,6 +284,7 @@ def handle_tool_call(
         "memory_update": _handle_update,
         "memory_forget": _handle_forget,
         "memory_relate": _handle_relate,
+        "memory_list": _handle_list,
     }
     handler = handlers.get(name)
     if handler is None:
@@ -359,3 +388,25 @@ def _handle_relate(params: dict[str, Any], mem: MemoryFS) -> dict[str, Any]:
     relationship = params["relationship"]
     strength = float(params.get("strength", 0.8))
     return mem.relate(source, target, relationship, strength=strength)
+
+
+def _handle_list(params: dict[str, Any], mem: MemoryFS) -> dict[str, Any]:
+    path_prefix = params.get("path_prefix", "/")
+    layer = params.get("layer")
+    limit = int(params.get("limit", 50))
+    objects = mem.list(path_prefix, layer=layer)
+    entries = [
+        {
+            "path": o.path,
+            "layer": o.layer,
+            "tags": o.tags,
+            "created_at": o.metadata.created_at,
+            "modified_at": o.metadata.modified_at,
+        }
+        for o in objects[:limit]
+    ]
+    return {
+        "status": "ok",
+        "count": len(entries),
+        "entries": entries,
+    }
