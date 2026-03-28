@@ -91,7 +91,7 @@ print(results[0].path, results[0].score)
 ## Architecture
 
 <p align="center">
-  <img src="./docs/llmfs_architecture_diagram_v2.svg" width="700" alt="MemoryFS Architecture" />
+  <img src="./docs/llmfs_architecture_diagram_v2.png" width="700" alt="MemoryFS Architecture" />
 </p>
 
 ### On-Disk Layout
@@ -730,7 +730,7 @@ Turn 36: "What was the exact error at auth.py line 45?"
 LLMFS works like virtual memory. Old turns are evicted from the context window and stored in LLMFS at full fidelity. A compact memory index (≈2k tokens) stays in the system prompt, listing what has been stored and where. When the LLM needs something, it calls `memory_read` or `memory_search` to page it back in.
 
 <p align="center">
-  <img src="./docs/llmfs_context_window_v2.svg" width="650" alt="MemoryFS Architecture" />
+  <img src="./docs/llmfs_context_window_v2.png" width="650" alt="MemoryFS Architecture" />
 </p>
 
 ### Drop-In Usage
