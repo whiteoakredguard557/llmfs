@@ -30,6 +30,10 @@ from llmfs.embeddings.base import EmbedderBase
 
 __all__ = ["AsyncMemoryFS"]
 
+# Alias so type annotations inside AsyncMemoryFS still refer to the builtin
+# ``list`` even though the class defines a method with the same name.
+_list = list
+
 
 class AsyncMemoryFS:
     """Async wrapper around :class:`~llmfs.core.filesystem.MemoryFS`.
@@ -177,7 +181,7 @@ class AsyncMemoryFS:
         *,
         layer: str | None = None,
         recursive: bool = True,
-    ) -> list[MemoryObject]:
+    ) -> _list[MemoryObject]:
         """Async version of :meth:`MemoryFS.list`."""
         return await asyncio.to_thread(
             self._sync.list, path_prefix, layer=layer, recursive=recursive,
@@ -191,7 +195,7 @@ class AsyncMemoryFS:
 
     # ── Query ─────────────────────────────────────────────────────────────────
 
-    async def query(self, mql: str) -> list[Any]:
+    async def query(self, mql: str) -> _list[Any]:
         """Async version of :meth:`MemoryFS.query`."""
         return await asyncio.to_thread(self._sync.query, mql)
 

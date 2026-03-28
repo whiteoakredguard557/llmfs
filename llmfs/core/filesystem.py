@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE = Path.home() / ".llmfs"
 _GC_INTERVAL_SECONDS = 60
 
+# Alias so type annotations inside MemoryFS still refer to the builtin
+# ``list`` even though the class defines a method with the same name.
+_list = list
+
 
 class MemoryFS:
     """Filesystem-metaphor persistent memory for LLMs and AI agents.
@@ -566,7 +570,7 @@ class MemoryFS:
         *,
         layer: str | None = None,
         recursive: bool = True,
-    ) -> list[MemoryObject]:
+    ) -> _list[MemoryObject]:
         """List memories under *path_prefix*.
 
         Args:
@@ -608,7 +612,7 @@ class MemoryFS:
 
     # ── GC (public) ───────────────────────────────────────────────────────────
 
-    def query(self, mql: str) -> list[Any]:  # type: ignore[valid-type]
+    def query(self, mql: str) -> _list[Any]:
         """Execute an MQL query string and return matching memories.
 
         This is a convenience wrapper around
@@ -658,11 +662,11 @@ class MemoryFS:
 
     def _raw_hits_to_results(
         self,
-        raw_hits: list[dict],
+        raw_hits: _list[dict],
         *,
-        tags: list[str] | None = None,
+        tags: _list[str] | None = None,
         created_after: str | None = None,
-    ) -> list[SearchResult]:
+    ) -> _list[SearchResult]:
         """Convert ChromaDB raw hits to SearchResult, applying post-filters."""
         seen: dict[str, SearchResult] = {}
         for item in raw_hits:
@@ -707,10 +711,10 @@ class MemoryFS:
         *,
         layer: str | None = None,
         path_prefix: str | None = None,
-        tags: list[str] | None = None,
+        tags: _list[str] | None = None,
         created_after: str | None = None,
         limit: int = 20,
-    ) -> list[SearchResult]:
+    ) -> _list[SearchResult]:
         """BM25 keyword search via SQLite FTS5, returning SearchResults."""
         fts_hits = self._db.fts_search(
             query, limit=limit, layer=layer, path_prefix=path_prefix,
@@ -765,7 +769,7 @@ class MemoryFS:
         self,
         mem_id: str,
         path: str,
-        embedding: list[float],
+        embedding: _list[float],
     ) -> None:
         """Create ``related_to`` edges to semantically similar memories.
 
