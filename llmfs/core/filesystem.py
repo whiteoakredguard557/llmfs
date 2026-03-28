@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,6 +89,7 @@ class MemoryFS:
 
         self._db = MetadataDB(self._base / "metadata.db")
         self._vs: VectorStore | None = None  # lazy-loaded on first use
+        self._vs_lock = threading.Lock()
         self._vs_dir = self._base / "chroma"
         self._chunker = AdaptiveChunker()
         self._summarizer = ExtractiveSummarizer()
@@ -113,7 +115,9 @@ class MemoryFS:
 
     def _get_vs(self) -> VectorStore:
         if self._vs is None:
-            self._vs = VectorStore(self._vs_dir)
+            with self._vs_lock:
+                if self._vs is None:
+                    self._vs = VectorStore(self._vs_dir)
         return self._vs
 
     # ── GC ────────────────────────────────────────────────────────────────────
