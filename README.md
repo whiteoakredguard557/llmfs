@@ -90,52 +90,7 @@ print(results[0].path, results[0].score)
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Public Interfaces                        │
-│  CLI (llmfs)   Python API   MCP Server   LangChain   OpenAI    │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │    MemoryFS     │  ← Single entry point for all ops
-                    │  (filesystem.py)│    write · read · search · update
-                    │                 │    forget · relate · list · query
-                    └────┬──────┬─────┘
-                         │      │
-          ┌──────────────▼──┐ ┌─▼──────────────────┐
-          │  Storage Layer  │ │  Embedding Layer     │
-          │                 │ │                      │
-          │ SQLite (WAL)    │ │ all-MiniLM-L6-v2     │
-          │  · file registry│ │ (local, 22 MB, CPU)  │
-          │  · chunks       │ │ or OpenAI text-      │
-          │  · tags         │ │ embedding-3-small    │
-          │  · graph edges  │ │                      │
-          │  · search cache │ └──────────────────────┘
-          │                 │
-          │ ChromaDB        │
-          │  · chunk vectors│
-          │  · metadata     │
-          │  · similarity   │
-          └─────────────────┘
-                    │
-          ┌─────────▼──────────────────────────────────┐
-          │               Processing Pipeline           │
-          │                                            │
-          │  AdaptiveChunker   ExtractiveSummarizer    │
-          │  (code-aware AST   (TF-IDF, level 1+2)    │
-          │   or prose-aware)                          │
-          │                                            │
-          │  RetrievalEngine   MemoryGraph             │
-          │  (semantic +       (BFS/DFS, relationship  │
-          │   temporal +        types, strength)       │
-          │   graph hybrid)                            │
-          │                                            │
-          │  ContextManager    MQL Parser+Executor     │
-          │  (virtual memory   (custom query language  │
-          │   manager for       → ChromaDB + SQLite)   │
-          │   infinite ctx)                            │
-          └────────────────────────────────────────────┘
-```
+![Architecture](./docs/architecture.svg)
 
 ### On-Disk Layout
 
