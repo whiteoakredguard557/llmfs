@@ -90,7 +90,9 @@ print(results[0].path, results[0].score)
 
 ## Architecture
 
-![Architecture](./docs/llmfs_architecture_diagram_v2.svg)
+<p align="center">
+  <img src="./docs/llmfs_architecture_diagram_v2.svg" width="700" alt="MemoryFS Architecture" />
+</p>
 
 ### On-Disk Layout
 
