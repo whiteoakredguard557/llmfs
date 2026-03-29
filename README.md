@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/llmfs.svg)](https://pypi.org/project/llmfs/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/github/actions/workflow/status/viditraj/llmfs/ci.yml?label=tests)](https://github.com/viditraj/llmfs/actions)
 
 **LLMFS gives LLMs and AI agents persistent, searchable, structured memory — organized like a filesystem.** Instead of losing context when a conversation grows past the token limit, agents offload memories to LLMFS and retrieve exactly what they need, when they need it. The result is zero information loss and an effectively unlimited context window — even over thousands of turns.
